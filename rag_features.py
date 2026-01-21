@@ -1,4 +1,5 @@
-from typing import Dict, Any, List
+import re
+from typing import List, Tuple, Any
 from langchain_groq import ChatGroq
 from langchain_core.prompts import ChatPromptTemplate
 from langchain_core.output_parsers import StrOutputParser
@@ -8,9 +9,11 @@ from qdrant_connect import QdrantConnector
 from document_utils import load_document, split_into_chunks
 
 class HybridRetriever:
-    """Core RAG logic combining functionality from Qdrant and Neo4j."""
+    """Core RAG logic with routing."""
     
-    def __init__(self):
+    def __init__(self, use_neo4j: bool = False):
+        self.use_neo4j = use_neo4j
+        
         if not GROQ_API_KEY or "your_groq_api_key" in GROQ_API_KEY:
             raise ValueError("Please set a valid GROQ_API_KEY in your .env file")
             
@@ -22,11 +25,77 @@ class HybridRetriever:
         
         # Initialize connectors
         self.qdrant = QdrantConnector()
-        self.graph_rag = GraphRAG(llm=self.llm)
         self.retriever = self.qdrant.get_retriever()
+        
+        self.graph_rag = None
+        if self.use_neo4j:
+            self.graph_rag = GraphRAG(llm=self.llm)
 
-    def ingest(self, file_paths: List[str], build_graph: bool = True) -> Dict[str, Any]:
-        """Ingest documents into both vector store and knowledge graph."""
+        # Routing patterns
+        self.patterns = {
+            'qdrant': [
+                r'what is', r'define', r'price', r'prix', r'cost', r'tarif', 
+                r'spec', r'feature', r'combien', r'c\'est quoi'
+            ],
+            'neo4j': [
+                r'related', r'history', r'evolution', r'connection', r'link',
+                r'historique', r'lien', r'impact'
+            ]
+        }
+
+    def route_query(self, query: str) -> str:
+        """Determine which retrieval method to use."""
+        query_lower = query.lower()
+        
+        for method, patterns in self.patterns.items():
+            for pattern in patterns:
+                if re.search(pattern, query_lower):
+                    return method
+                    
+        return 'hybrid'
+
+    def retrieve(self, query: str) -> Tuple[List[Any], str]:
+        """Retrieve context based on routing."""
+        route = self.route_query(query)
+        chunks = []
+        
+        if route in ['qdrant', 'hybrid']:
+            # Vector search
+            chunks.extend(self.retriever.invoke(query))
+            
+        if route in ['neo4j', 'hybrid'] and self.use_neo4j and self.graph_rag and self.graph_rag.is_available():
+            # Graph search (returning as text/string for now, wrapped in list for consistency)
+            graph_context = self.graph_rag.query_graph(query)
+            if graph_context:
+                # We wrap it in a mock object or string to treat as a chunk
+                from langchain_core.documents import Document
+                chunks.append(Document(page_content=f"Generic Graph Context: {graph_context}", metadata={"source": "neo4j"}))
+
+        return chunks, route
+
+    def generate_answer(self, query: str, context_chunks: List[Any], route: str) -> str:
+        """Generate answer from context."""
+        context_text = "\n\n".join([doc.page_content for doc in context_chunks])
+        
+        if not context_text:
+            context_text = "No relevant information found."
+
+        system_prompt = (
+            f"You are an intelligent assistant using {route} retrieval strategy. "
+            "Use the provided context to answer the user's question.\n\n"
+            "Context:\n{context}"
+        )
+        
+        prompt = ChatPromptTemplate.from_messages([
+            ("system", system_prompt),
+            ("human", "{input}"),
+        ])
+        
+        chain = prompt | self.llm | StrOutputParser()
+        return chain.invoke({"input": query, "context": context_text})
+
+    def ingest(self, file_paths: List[str]) -> dict:
+        """Ingest documents into enabled stores."""
         docs = []
         for path in file_paths:
             docs.extend(load_document(path))
@@ -40,45 +109,13 @@ class HybridRetriever:
             "graph_relations": 0
         }
         
-        if build_graph and self.graph_rag.is_available():
-            print("Building Knowledge Graph... This may take a moment.")
-            graph_stats = self.graph_rag.build_graph(docs)
-            result["graph_entities"] = graph_stats["entities"]
-            result["graph_relations"] = graph_stats["relations"]
+        if self.use_neo4j and self.graph_rag and self.graph_rag.is_available():
+            print("Building Knowledge Graph...")
+            stats = self.graph_rag.build_graph(docs)
+            result.update({
+                "graph_entities": stats["entities"],
+                "graph_relations": stats["relations"]
+            })
             
         return result
 
-    def query(self, question: str, use_graph: bool = True) -> str:
-        """Query using hybrid retrieval."""
-        try:
-            # Vector retrieval
-            docs = self.retriever.invoke(question)
-            vector_context = "\n\n".join(doc.page_content for doc in docs) if docs else "No relevant documents found in vector store."
-            
-            # Graph retrieval
-            graph_context = ""
-            if use_graph and self.graph_rag.is_available():
-                graph_context = self.graph_rag.query_graph(question)
-            
-            # Combine
-            combined_context = f"## Vector Search Results:\n{vector_context}"
-            if graph_context:
-                combined_context += f"\n\n## {graph_context}"
-            
-            # Generate answer
-            system_prompt = (
-                "You are an intelligent assistant. Use the provided context to answer the user's question. "
-                "If the information is insufficient, acknowledge it. Be concise.\n\n"
-                "Context:\n{context}"
-            )
-            
-            prompt = ChatPromptTemplate.from_messages([
-                ("system", system_prompt),
-                ("human", "{input}"),
-            ])
-            
-            chain = prompt | self.llm | StrOutputParser()
-            return chain.invoke({"input": question, "context": combined_context})
-            
-        except Exception as e:
-            return f"Error processing query: {e}"

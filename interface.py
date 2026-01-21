@@ -63,6 +63,10 @@ if prompt := st.chat_input("Ask about GreenPower products..."):
 
     with st.chat_message("assistant"):
         with st.spinner("Thinking..."):
-            response = rag.query(prompt)
+            chunks, route = rag.retrieve(prompt)
+            response = rag.generate_answer(prompt, chunks, route)
             st.markdown(response)
             st.session_state.messages.append({"role": "assistant", "content": response})
+            with st.expander("Debug Details"):
+                st.write(f"Route used: **{route}**")
+                st.write("Context chunks:", chunks)
