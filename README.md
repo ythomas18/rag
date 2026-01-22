@@ -45,6 +45,9 @@ The application will be available at `http://localhost:8501`
 
 The application requires authentication to access.
 
+[pictures/capture1.png](pictures/capture1.png)
+
+
 ### Default Credentials
 
 | Username | Password | Role |
@@ -99,20 +102,29 @@ RAG_App_3/
 - Automatic text extraction with LlamaParse fallback
 - Chunking and embedding for vector search
 
+
 ### 🌐 Web Scraping
 - Scrape web pages and add to knowledge base
 - Extract text, images, and metadata
 - Follow internal links (optional)
+
+[pictures/capture4.png](pictures/capture4.png)
+
 
 ### 💬 Chat Interface
 - Query your documents using natural language
 - Hybrid routing (vector search + knowledge graph)
 - Real-time response streaming
 
+[pictures/capture2.png](pictures/capture2.png)
+
+
 ### 📊 Metrics Dashboard
 - Query latency tracking
 - Route distribution analysis
 - Performance comparisons
+
+[pictures/capture3.png](pictures/capture3.png)
 
 ---
 
@@ -130,15 +142,4 @@ See `BluePrint.md` for detailed technical documentation.
 
 ---
 
-## 📝 License
 
-This project is for educational purposes.
-
----
-
-## 🤝 Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push and create a Pull Request

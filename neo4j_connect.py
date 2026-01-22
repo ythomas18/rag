@@ -168,93 +168,62 @@ class GraphRAG:
     def is_available(self) -> bool:
         return self.neo4j.is_connected()
     
-    def extract_entities_and_relations(self, text: str) -> Dict[str, Any]:
-        """Use LLM to extract entities and relationships from text."""
-        if not self.llm:
-            return {"entities": [], "relations": []}
-        
-        # Note: Double curly braces {{ }} are used to escape them in the template
-        extraction_prompt = ChatPromptTemplate.from_messages([
-            ("system", """You are an expert at extracting entities and relationships from text.
-Extract entities (people, organizations, concepts, locations, etc.) and relationships between them.
-
-Return your response as a valid JSON object with this structure:
-{{
-    "entities": [
-        {{"name": "entity name", "type": "PERSON|ORGANIZATION|CONCEPT|LOCATION|PRODUCT|EVENT", "description": "brief description"}}
-    ],
-    "relations": [
-        {{"from": "entity1 name", "to": "entity2 name", "type": "RELATIONSHIP_TYPE", "description": "brief description"}}
-    ]
-}}
-
-Rules:
-- Entity names should be normalized (proper capitalization, full names)
-- Relationship types should be uppercase with underscores (e.g., WORKS_FOR, LOCATED_IN, RELATED_TO)
-- Only extract clear, factual information
-- Return ONLY the JSON, no additional text"""),
-            ("human", "Extract entities and relationships from this text:\n\n{text}")
-        ])
-        
-        try:
-            chain = extraction_prompt | self.llm | StrOutputParser()
-            response = chain.invoke({"text": text[:4000]})  # Limit text length
-            
-            cleaned = response.strip()
-            if cleaned.startswith("```"):
-                cleaned = re.sub(r'^```(?:json)?\s*', '', cleaned)
-                cleaned = re.sub(r'\s*```$', '', cleaned)
-            
-            return json.loads(cleaned)
-        except Exception as e:
-            print(f"Entity extraction error: {e}")
-            return {"entities": [], "relations": []}
     
     def build_graph(self, documents: List[Document]) -> Dict[str, int]:
-        """Build knowledge graph from documents."""
-        if not self.is_available():
+        """Build knowledge graph from documents using LangChain LLMGraphTransformer."""
+        if not self.is_available() or not self.llm:
             return {"entities": 0, "relations": 0}
+        
+        try:
+            from langchain_experimental.graph_transformers import LLMGraphTransformer
+        except ImportError:
+            print("⚠️ langchain-experimental not installed. Skipping graph build.")
+            return {"entities": 0, "relations": 0}
+            
+        print("🧠 Transforming documents to graph structure with LLM...")
+        llm_transformer = LLMGraphTransformer(llm=self.llm)
+        
+        # Convert documents to graph documents
+        # Note: We process limited chunks to avoid context limits
+        graph_documents = llm_transformer.convert_to_graph_documents(documents[:50])
         
         total_entities = 0
         total_relations = 0
         entity_id_map = {}
         
-        for doc in documents:
-            extracted = self.extract_entities_and_relations(doc.page_content)
-            
-            # Create entity nodes
-            for entity in extracted.get("entities", []):
-                entity_name = entity.get("name", "").strip()
-                if not entity_name: continue
-                    
+        print(f"🕸️ Inserting {len(graph_documents)} graph documents into Neo4j...")
+        
+        for graph_doc in graph_documents:
+            # 1. Insert Nodes
+            for node in graph_doc.nodes:
+                entity_name = node.id
                 if entity_name.lower() not in entity_id_map:
                     node_id = self.neo4j.create_node(
-                        label=entity.get("type", "ENTITY"),
+                        label=node.type,
                         properties={
                             "name": entity_name,
-                            "description": entity.get("description", ""),
-                            "source": doc.metadata.get("source", "unknown")
+                            "source": graph_doc.source.metadata.get("source", "unknown")
                         }
                     )
                     if node_id is not None:
                         entity_id_map[entity_name.lower()] = node_id
                         total_entities += 1
             
-            # Create relationships
-            for relation in extracted.get("relations", []):
-                from_name = relation.get("from", "").strip().lower()
-                to_name = relation.get("to", "").strip().lower()
-                rel_type = relation.get("type", "RELATED_TO").upper().replace(" ", "_")
+            # 2. Insert Relationships
+            for rel in graph_doc.relationships:
+                from_name = rel.source.id.lower()
+                to_name = rel.target.id.lower()
+                rel_type = rel.type.replace(" ", "_").upper()
                 
                 if from_name in entity_id_map and to_name in entity_id_map:
                     self.neo4j.create_relationship(
                         from_id=entity_id_map[from_name],
                         to_id=entity_id_map[to_name],
                         rel_type=rel_type,
-                        properties={"description": relation.get("description", "")}
+                        properties={} # LLMGraphTransformer relations usually don't have extra props by default
                     )
                     total_relations += 1
-        
+                    
         return {"entities": total_entities, "relations": total_relations}
     
     def query_graph(self, question: str) -> str:
