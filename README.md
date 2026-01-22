@@ -45,7 +45,7 @@ The application will be available at `http://localhost:8501`
 
 The application requires authentication to access.
 
-[pictures/capture1.png](pictures/capture1.png)
+![pictures/capture1.png](pictures/capture1.png)
 
 
 ### Default Credentials
@@ -108,7 +108,7 @@ RAG_App_3/
 - Extract text, images, and metadata
 - Follow internal links (optional)
 
-[pictures/capture4.png](pictures/capture4.png)
+![pictures/capture4.png](pictures/capture4.png)
 
 
 ### 💬 Chat Interface
@@ -116,7 +116,7 @@ RAG_App_3/
 - Hybrid routing (vector search + knowledge graph)
 - Real-time response streaming
 
-[pictures/capture2.png](pictures/capture2.png)
+![pictures/capture2.png](pictures/capture2.png)
 
 
 ### 📊 Metrics Dashboard
@@ -124,7 +124,7 @@ RAG_App_3/
 - Route distribution analysis
 - Performance comparisons
 
-[pictures/capture3.png](pictures/capture3.png)
+![pictures/capture3.png](pictures/capture3.png)
 
 ---
 
