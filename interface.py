@@ -6,9 +6,17 @@ import pandas as pd
 import csv
 from datetime import datetime
 from rag_features import HybridRetriever
+from auth import require_auth, logout, init_session_state
 
 st.set_page_config(page_title="GreenPower RAG", page_icon="⚡", layout="wide")
 
+# --- Authentication Check ---
+init_session_state(st)
+
+if not require_auth(st):
+    st.stop()  # Stop here if not authenticated
+
+# --- User is authenticated from this point ---
 st.title("⚡ GreenPower Hybrid RAG")
 st.markdown("Query your documents using Vector Search + Knowledge Graph.")
 
@@ -31,13 +39,20 @@ def get_engine():
 
 try:
     rag = get_engine()
-    # st.success("System initialized successfully!") # Moved to sidebar or simplified to avoid clutter
 except Exception as e:
     st.error(f"Initialization failed: {e}")
     st.stop()
 
 # --- Sidebar ---
 with st.sidebar:
+    # User info and logout
+    user = st.session_state.user
+    st.markdown(f"👤 **{user['display_name']}** ({user['role']})")
+    if st.button("🚪 Logout", use_container_width=True):
+        logout(st)
+        st.rerun()
+    
+    st.divider()
     st.header("📄 Document Ingestion")
     
     # Check LlamaParse Status
